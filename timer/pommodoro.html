@@ -31,6 +31,15 @@
   .timer{
     display:flex;flex-direction:column;align-items:center;justify-content:center;padding:18px;border-radius:12px;background:var(--glass);
     min-height:220px;
+    position: relative;
+    overflow: hidden;
+  }
+  .timer.flashing {
+    animation: flash 1s ease-in-out 3;
+  }
+  @keyframes flash {
+    0%, 100% { background-color: var(--glass); }
+    50% { background-color: rgba(255, 122, 89, 0.2); }
   }
   .bigtime{font-size:4rem;font-weight:700;letter-spacing: -3px}
   .label{margin-top:6px;color:var(--muted)}
@@ -139,6 +148,7 @@
   const skipBtn = document.getElementById('skipBtn');
   const soundBtn = document.getElementById('soundBtn');
   const saveBtn = document.getElementById('saveBtn');
+  const timerEl = document.querySelector('.timer');
 
   const workMin = document.getElementById('workMin');
   const shortMin = document.getElementById('shortMin');
@@ -247,6 +257,10 @@
   function handlePeriodEnd(){
     // beep and notify
     if(state.soundOn) beep();
+    // Add visual feedback
+    timerEl.classList.add('flashing');
+    setTimeout(() => timerEl.classList.remove('flashing'), 3000);
+    
     maybeNotify(`${capitalize(state.mode)} ended`, getEndMessage());
     if(state.mode === 'work'){
       state.completedCycles++;
@@ -316,36 +330,62 @@
   // small utilities
   function capitalize(s){ return s.charAt(0).toUpperCase() + s.slice(1); }
 
-  // sound: simple beep with Web Audio API
-  // sound: simple beep with Web Audio API
-let audioCtx = null;
-function ensureAudio() {
-  if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  // sound: longer and more noticeable beep with Web Audio API
+  let audioCtx = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    // Resume audio context if it's suspended (needed in Chrome/Firefox)
+    if (audioCtx.state === "suspended") {
+      audioCtx.resume();
+    }
   }
-  // Resume audio context if it’s suspended (needed in Chrome/Firefox)
-  if (audioCtx.state === "suspended") {
-    audioCtx.resume();
-  }
-}
 
-function beep() {
-  try {
-    ensureAudio();
-    const o = audioCtx.createOscillator();
-    const g = audioCtx.createGain();
-    o.type = "sine";
-    o.frequency.value = 880; // Hz
-    g.gain.value = 0.1;
-    o.connect(g);
-    g.connect(audioCtx.destination);
-    o.start();
-    o.stop(audioCtx.currentTime + 0.5);
-  } catch (e) {
-    console.warn("Beep failed:", e);
+  function beep() {
+    try {
+      ensureAudio();
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.type = "sine";
+      o.frequency.value = 880; // Hz
+      g.gain.value = 0.1;
+      o.connect(g);
+      g.connect(audioCtx.destination);
+      o.start();
+      
+      // Create a more noticeable pattern: three beeps with pauses
+      o.stop(audioCtx.currentTime + 0.3);
+      
+      // Add two more beeps after short pauses
+      setTimeout(() => {
+        const o2 = audioCtx.createOscillator();
+        const g2 = audioCtx.createGain();
+        o2.type = "sine";
+        o2.frequency.value = 880;
+        g2.gain.value = 0.1;
+        o2.connect(g2);
+        g2.connect(audioCtx.destination);
+        o2.start();
+        o2.stop(audioCtx.currentTime + 0.3);
+      }, 500);
+      
+      setTimeout(() => {
+        const o3 = audioCtx.createOscillator();
+        const g3 = audioCtx.createGain();
+        o3.type = "sine";
+        o3.frequency.value = 880;
+        g3.gain.value = 0.1;
+        o3.connect(g3);
+        g3.connect(audioCtx.destination);
+        o3.start();
+        o3.stop(audioCtx.currentTime + 0.3);
+      }, 1000);
+      
+    } catch (e) {
+      console.warn("Beep failed:", e);
+    }
   }
-}
-
 
   // Notifications
   function maybeNotify(title, body){
