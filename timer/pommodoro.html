@@ -62,6 +62,24 @@
   .stack{display:flex;flex-direction:column;gap:8px}
   .muted{color:var(--muted)}
   .kbd{background:rgba(255,255,255,0.03);border-radius:6px;padding:6px 8px;font-size:.8rem}
+  
+  /* New notification options */
+  .notification-options {
+    margin-top: 10px;
+    padding: 10px;
+    background: rgba(255,255,255,0.02);
+    border-radius: 8px;
+  }
+  .notification-options label {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+  }
+  .notification-options input[type="checkbox"] {
+    margin: 0;
+  }
 </style>
 </head>
 <body>
@@ -122,8 +140,21 @@
             <option value="none">None</option>
             <option value="browser">Browser (permission required)</option>
             <option value="both">Browser + Sound</option>
+            <option value="tab">Tab Flashing</option>
+            <option value="all">All Notifications</option>
           </select>
         </label>
+        
+        <div class="notification-options">
+          <label>
+            <input type="checkbox" id="tabFlashEnabled" checked>
+            Flash browser tab when timer ends
+          </label>
+          <label>
+            <input type="checkbox" id="focusAlertEnabled" checked>
+            Alert even when tab is not focused
+          </label>
+        </div>
 
         <div style="display:flex;gap:8px;justify-content:space-between;align-items:center">
           <div class="muted">Shortcuts: <span class="kbd">Space</span> start/pause <span class="kbd">R</span> reset</div>
@@ -149,6 +180,8 @@
   const soundBtn = document.getElementById('soundBtn');
   const saveBtn = document.getElementById('saveBtn');
   const timerEl = document.querySelector('.timer');
+  const tabFlashEnabled = document.getElementById('tabFlashEnabled');
+  const focusAlertEnabled = document.getElementById('focusAlertEnabled');
 
   const workMin = document.getElementById('workMin');
   const shortMin = document.getElementById('shortMin');
@@ -172,7 +205,54 @@
     cycleCount: 0,
     completedCycles: 0,
     soundOn: true,
+    tabFlashInterval: null,
+    originalTitle: document.title
   };
+
+  // Tab notification variables
+  let isFlashing = false;
+  let flashCount = 0;
+  const maxFlashCount = 20; // Flash for 20 cycles then stop
+
+  // Tab flashing functionality
+  function startTabFlash() {
+    if (!tabFlashEnabled.checked) return;
+    
+    isFlashing = true;
+    flashCount = 0;
+    const messages = [
+      "⏰ Timer Finished!",
+      "Time's Up! ⏰"
+    ];
+    let messageIndex = 0;
+    
+    state.tabFlashInterval = setInterval(() => {
+      if (flashCount >= maxFlashCount) {
+        stopTabFlash();
+        return;
+      }
+      
+      document.title = messages[messageIndex];
+      messageIndex = (messageIndex + 1) % messages.length;
+      flashCount++;
+    }, 800);
+  }
+
+  function stopTabFlash() {
+    isFlashing = false;
+    if (state.tabFlashInterval) {
+      clearInterval(state.tabFlashInterval);
+      state.tabFlashInterval = null;
+    }
+    document.title = state.originalTitle;
+  }
+
+  // Reset tab title when page becomes visible again
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible' && !isFlashing) {
+      document.title = state.originalTitle;
+    }
+  });
 
   // load/save settings
   const STORAGE_KEY = 'custom_pomodoro_settings_v1';
@@ -187,6 +267,8 @@
         autoStart.value = stored.autoStart ?? 'true';
         notifyPerm.value = stored.notifyPerm ?? 'none';
         state.completedCycles = stored.completedCycles || 0;
+        tabFlashEnabled.checked = stored.tabFlashEnabled !== false;
+        focusAlertEnabled.checked = stored.focusAlertEnabled !== false;
         completedCyclesEl.textContent = state.completedCycles;
       }
     }catch(e){}
@@ -201,6 +283,8 @@
       autoStart: autoStart.value,
       notifyPerm: notifyPerm.value,
       completedCycles: state.completedCycles,
+      tabFlashEnabled: tabFlashEnabled.checked,
+      focusAlertEnabled: focusAlertEnabled.checked
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     flashSave();
@@ -255,13 +339,23 @@
   }
 
   function handlePeriodEnd(){
-    // beep and notify
-    if(state.soundOn) beep();
-    // Add visual feedback
-    timerEl.classList.add('flashing');
-    setTimeout(() => timerEl.classList.remove('flashing'), 3000);
+    // Stop any existing tab flash
+    stopTabFlash();
     
-    maybeNotify(`${capitalize(state.mode)} ended`, getEndMessage());
+    // Only alert if tab is focused OR if focusAlert is enabled
+    if (document.hasFocus() || focusAlertEnabled.checked) {
+      // beep and notify
+      if(state.soundOn) beep();
+      // Add visual feedback
+      timerEl.classList.add('flashing');
+      setTimeout(() => timerEl.classList.remove('flashing'), 3000);
+      
+      // Start tab flashing notification
+      startTabFlash();
+      
+      maybeNotify(`${capitalize(state.mode)} ended`, getEndMessage());
+    }
+    
     if(state.mode === 'work'){
       state.completedCycles++;
       state.cycleCount++;
@@ -305,6 +399,8 @@
     state.running = true;
     state.intervalId = setInterval(tick, 1000);
     render();
+    // Stop any flashing when timer starts
+    stopTabFlash();
   }
   function pause(){
     state.running = false;
@@ -318,6 +414,8 @@
     state.cycleCount = 0;
     applyDurationsToState();
     render();
+    // Stop any flashing when timer resets
+    stopTabFlash();
     // keep completed cycles count
   }
   function skip(){
@@ -390,7 +488,7 @@
   // Notifications
   function maybeNotify(title, body){
     const pref = notifyPerm.value;
-    if(pref === 'browser' || pref === 'both'){
+    if(pref === 'browser' || pref === 'both' || pref === 'all'){
       if(window.Notification && Notification.permission === 'granted'){
         new Notification(title, {body});
       }
@@ -432,9 +530,13 @@
     });
   });
 
+  [tabFlashEnabled, focusAlertEnabled].forEach(el => {
+    el.addEventListener('change', saveSettings);
+  });
+
   saveBtn.addEventListener('click', saveSettings);
   notifyPerm.addEventListener('change', async ()=>{
-    if(notifyPerm.value === 'browser' || notifyPerm.value === 'both'){
+    if(notifyPerm.value === 'browser' || notifyPerm.value === 'both' || notifyPerm.value === 'all'){
       await requestNotificationPermission();
       if(Notification.permission !== 'granted'){
         alert('Browser notification permission denied or blocked. Change browser permissions to enable.');
@@ -462,6 +564,9 @@
   loadSettings();
   applyDurationsToState();
   render();
+
+  // Store original page title
+  state.originalTitle = document.title;
 
   // expose a tiny API for dev console
   window._pomodoro = {
